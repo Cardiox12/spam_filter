@@ -1,9 +1,14 @@
 (defpackage :com.bbellavi.spam
   (:use :common-lisp :com.bbellavi.pathnames))
 
+(ql:quickload :cl-ppcre)
+
 (defparameter *max-ham-score* .4)
 (defparameter *min-spam-score* .6)
 (defvar *feature-database* (make-hash-table :test #'equal))
+(defvar *total-hams* 0)
+(defvar *total-spams* 0)
+
 
 (defclass word-feature ()
   ((word
@@ -28,7 +33,10 @@
       (format stream "~s :hams ~d :spams ~d" word ham-count spam-count))))
 
 (defun clear-database ()
-  (setf *feature-database* (make-hash-table :test #'equal)))
+  (setf
+   *feature-database* (make-hash-table :test #'equal)
+   *total-spams* 0
+   *total-hams* 0))
 
 (defun intern-feature (word)
   (or (gethash word *feature-database*)
@@ -45,9 +53,37 @@
 
 (defun classification (score)
   (cond
-    ((<= score *max-ham-score*) 'ham)
-    ((>= score *min-spam-score*) 'spam)
-    (t                          'unsure)))
+    ((<= score *max-ham-score*)   'ham)
+    ((>= score *min-spam-score*)  'spam)
+    (t                            'unsure)))
+
+(defun spam-probability (feature)
+  (with-slots (spam-count ham-count) feature
+    (/ spam-count (+ spam-count ham-count))))
+
+(defun bayesian-spam-probability (feature &optional
+                                  (assumed-probability 1/2)
+                                  (weigth 1))
+  (let ((basic-probability (spam-probability feature))
+        (data-points (+ (spam-count feature) (ham-count feature))))
+    (/ (+ (* weight assumed-probability)
+          (* data-points basic-probability))
+       (+ weigth data-points))))
+
+(defun increment-total-count (type)
+  (ecase type
+    (ham (incf *total-hams*))
+    (spam (incf *total-spams*))))
+
+(defun increment-count (feature type)
+  (ecase type
+    (ham (incf (ham-count feature)))
+    (spam (incf (spam-count feature)))))
+
+(defun train (text type)
+  (dolist (feature (extract-features text))
+    (increment-count feature type))
+  (increment-total-count type))
 
 (defun classify (text)
   (classification (score (extract-features text))))
